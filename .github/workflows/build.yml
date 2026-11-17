@@ -27,11 +27,27 @@ jobs:
 
       - name: Pasang buildozer
         run: |
-          python -m pip install --upgrade pip setuptools
+          python -m pip install --upgrade pip wheel "setuptools<81"
           pip install buildozer "cython==0.29.37"
 
       - name: Build APK
-        run: buildozer -v android debug
+        run: buildozer -v android debug > build.log 2>&1
+
+      - name: Tampilkan penyebab error
+        if: failure()
+        run: |
+          LN=$(grep -n "# Command failed" build.log | head -1 | cut -d: -f1)
+          LN=${LN:-$(wc -l < build.log)}
+          START=$((LN-80))
+          if [ "$START" -lt 1 ]; then START=1; fi
+          sed -n "${START},$((LN-1))p" build.log
+
+      - name: Simpan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Simpan APK
         uses: actions/upload-artifact@v4
