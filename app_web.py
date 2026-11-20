@@ -2,7 +2,7 @@
 """
 SIGA BKKBN Data Explorer - Versi Web (Streamlit) dengan:
 - Auto-Refresh Latar Belakang (setiap 30 detik setelah rekap awal selesai)
-- Target Kecamatan Juara 1 (% BKB & % BKL) + highlight + tabel gap menuju peringkat 1
+- Target Kecamatan Juara 1 (% BKB & % BKL) + highlight seluruh baris + tabel gap menuju peringkat 1
 - Notifikasi Telegram otomatis saat kecamatan target yang sempat peringkat 1 tersalip
 
 Letakkan satu folder dengan siga_core.py.
@@ -91,6 +91,53 @@ def _angka_bersih(val) -> float:
     if isinstance(val, (int, float)):
         return float(val) if not math.isnan(float(val)) else 0.0
     return core.to_num(val)
+
+
+def ambil_daftar_kecamatan(kab_id: str, hasil_rekap=None) -> list:
+    """
+    Mengambil daftar nama kecamatan untuk kabupaten terpilih.
+    Memastikan daftar langsung tersedia bahkan sebelum rekap dijalankan dengan menarik master jika belum ada di cache.
+    """
+    kec_set = set()
+
+    # 1. Cek cache di memori terlebih dahulu
+    try:
+        master_cached = core._MASTER.get(kab_id)
+        if master_cached and isinstance(master_cached, dict):
+            for v in master_cached.get("kec", {}).values():
+                if v and str(v).strip():
+                    kec_set.add(str(v).strip().upper())
+    except Exception:
+        pass
+
+    # 2. Jika belum ada di cache, coba ambil data master langsung dari siga_core
+    if not kec_set and hasattr(core, "ambil_master"):
+        try:
+            master_data = core.ambil_master(kab_id, paksa=False)
+            if isinstance(master_data, dict):
+                kec_map = master_data.get("kec") or master_data.get("kecamatan") or {}
+                if isinstance(kec_map, dict):
+                    for v in kec_map.values():
+                        if v and str(v).strip():
+                            kec_set.add(str(v).strip().upper())
+                elif isinstance(kec_map, list):
+                    for item in kec_map:
+                        if isinstance(item, dict):
+                            nama = item.get("nama") or item.get("nama_kec") or item.get("kec")
+                            if nama and str(nama).strip():
+                                kec_set.add(str(nama).strip().upper())
+                        elif item and str(item).strip():
+                            kec_set.add(str(item).strip().upper())
+        except Exception:
+            pass
+
+    # 3. Tambahkan kecamatan dari hasil rekap jika sudah ada
+    if hasil_rekap and isinstance(hasil_rekap, dict) and hasil_rekap.get("rekap"):
+        for r in hasil_rekap["rekap"]:
+            if r and str(r[0]).strip():
+                kec_set.add(str(r[0]).strip().upper())
+
+    return sorted(kec_set)
 
 
 def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nama: str, tahun_pilih: str):
@@ -214,7 +261,7 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
             bkl_rank_str,
             f"{target_item['bkl_pct']:.2f}%",
             f"{bkl_lead_kec} ({bkl_lead_pct})",
-            f"+{bkb_kurang_pct:.2f}%",
+            f"+{bkl_kurang_pct:.2f}%",
             f"{bkl_kurang_unit:,} capaian" if bkl_kurang_unit > 0 else "0",
             bkl_status,
         ],
@@ -460,28 +507,11 @@ with col3:
 
 # ---------- pilihan kecamatan target juara 1 + pengaturan telegram ----------
 kab_id_aktif = core.KABUPATEN_MAPPING[kab_nama]
+daftar_kec_tersedia = ambil_daftar_kecamatan(kab_id_aktif, st.session_state.hasil_rekap)
 
-opsi_kec = ["(Tidak ada / Pantau semua)"]
-try:
-    master_cached = core._MASTER.get(kab_id_aktif)
-    if master_cached and master_cached.get("kec"):
-        kec_dari_master = sorted(set(str(v).strip().upper() for v in master_cached["kec"].values() if v))
-        opsi_kec.extend(kec_dari_master)
-except Exception:
-    pass
-
-if st.session_state.hasil_rekap and st.session_state.hasil_rekap.get("rekap"):
-    kec_dari_hasil = [
-        str(r[0]).strip().upper()
-        for r in st.session_state.hasil_rekap["rekap"]
-        if r and str(r[0]).strip()
-    ]
-    for k in kec_dari_hasil:
-        if k not in opsi_kec:
-            opsi_kec.append(k)
-
+opsi_kec = ["(Tidak ada / Pantau semua)"] + daftar_kec_tersedia
 if st.session_state.target_kec_pilih not in opsi_kec:
-    opsi_kec.append(st.session_state.target_kec_pilih)
+    st.session_state.target_kec_pilih = "(Tidak ada / Pantau semua)"
 
 col_t1, col_t2 = st.columns([2.0, 3.0])
 with col_t1:
@@ -489,7 +519,7 @@ with col_t1:
         "Target Kecamatan Juara 1 (% BKB & % BKL)",
         options=opsi_kec,
         index=opsi_kec.index(st.session_state.target_kec_pilih),
-        help="Kecamatan yang ditandai akan di-highlight dan diukur selisih capaiannya menuju Peringkat 1.",
+        help="Pilih kecamatan target untuk di-highlight di tabel seluruh kecamatan dan dihitung selisih capaian menuju Peringkat 1.",
     )
     st.session_state.target_kec_pilih = target_kec_pilih
 
@@ -730,7 +760,7 @@ def tampilkan_hasil_live():
             unsafe_allow_html=True,
         )
 
-        st.subheader(f"📈 Tabel Mengejar Peringkat 1 — {analisis['target_kec']}")
+        st.subheader(f"📈 Target Capaian Menuju Peringkat 1 — {analisis['target_kec']}")
         kol_kejar = [
             "Indikator",
             "Kecamatan Target",
@@ -746,7 +776,11 @@ def tampilkan_hasil_live():
 
     def sorot_baris_rekap(row):
         nama_kec_row = str(row.get("Nama Kecamatan", "")).strip().upper()
-        is_target = bool(target_kec_aktif) and target_kec_aktif != "(Tidak ada / Pantau semua)" and nama_kec_row == target_kec_aktif.strip().upper()
+        is_target = (
+            bool(target_kec_aktif)
+            and target_kec_aktif != "(Tidak ada / Pantau semua)"
+            and nama_kec_row == target_kec_aktif.strip().upper()
+        )
 
         try:
             persen_bkb = float(str(row["% BKB"]).replace("%", "").strip())
@@ -756,10 +790,8 @@ def tampilkan_hasil_live():
 
         styles = []
         for col_name in row.index:
-            if is_target and col_name == "Nama Kecamatan":
-                styles.append("background-color: #FEF08A; color: #713F12; font-weight: 800; border: 2px solid #CA8A04;")
-            elif is_target:
-                styles.append("background-color: #FEF9C3; color: #1E293B; font-weight: 600;")
+            if is_target:
+                styles.append("background-color: #FEF08A; color: #713F12; font-weight: 800; border-top: 2px solid #CA8A04; border-bottom: 2px solid #CA8A04;")
             elif di_atas_ambang:
                 styles.append("background-color: #0B5CAD; color: #FFFFFF; font-weight: 600;")
             else:
@@ -769,9 +801,9 @@ def tampilkan_hasil_live():
     tab_rekap, tab_detail = st.tabs(["Rekap Kecamatan", "Detail Poktan"])
 
     with tab_rekap:
-        ket_highlight = f"Baris biru = % BKB di atas {core.AMBANG_BIRU:.0f}."
+        ket_highlight = f"Seluruh kecamatan tetap ditampilkan. Baris kuning = kecamatan target (**{analisis['target_kec']}**)" if analisis is not None else f"Baris biru = % BKB di atas {core.AMBANG_BIRU:.0f}."
         if analisis is not None:
-            ket_highlight += f" Kolom kuning tegas pada **Nama Kecamatan** = kecamatan target pantauan (**{analisis['target_kec']}**)."
+            ket_highlight += f" | Baris biru = % BKB di atas {core.AMBANG_BIRU:.0f}."
         st.caption(ket_highlight)
         st.dataframe(
             df_rekap.style.apply(sorot_baris_rekap, axis=1),
