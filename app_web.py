@@ -101,8 +101,6 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
     if not rekap_rows or not target_kec or target_kec == "(Tidak ada / Pantau semua)":
         return None
 
-    # Struktur tiap item di rekap_rows:
-    # [kec, peserta_bkb, target_bkb, persen_bkb, target_bkl, capaian_bkl, persen_bkl]
     parsed = []
     for r in rekap_rows:
         kec = str(r[0]).strip()
@@ -126,23 +124,18 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
     if target_item is None:
         return None
 
-    # Ranking BKB (persen tertinggi, lalu capaian tertinggi)
     rank_bkb = sorted(parsed, key=lambda x: (x["bkb_pct"], x["bkb_cap"]), reverse=True)
     pos_bkb = next((idx + 1 for idx, x in enumerate(rank_bkb) if x["kec"] == target_item["kec"]), len(rank_bkb))
     leader_bkb = rank_bkb[0] if rank_bkb else None
 
-    # Ranking BKL (persen tertinggi, lalu capaian tertinggi)
     rank_bkl = sorted(parsed, key=lambda x: (x["bkl_pct"], x["bkl_cap"]), reverse=True)
     pos_bkl = next((idx + 1 for idx, x in enumerate(rank_bkl) if x["kec"] == target_item["kec"]), len(rank_bkl))
     leader_bkl = rank_bkl[0] if rank_bkl else None
 
-    # Hitung kurang berapa capaian/peserta agar menyalip pemimpin (peringkat 1)
-    # Jika target sendiri adalah peringkat 1, bandingkan dengan peringkat 2 (atau 0 jika sudah unggul)
     def hitung_kejar_bkb():
         if pos_bkb == 1:
             if len(rank_bkb) > 1:
                 runner_up = rank_bkb[1]
-                # Selisih persen terhadap runner-up
                 selisih_pct = max(0.0, round(target_item["bkb_pct"] - runner_up["bkb_pct"], 2))
                 return (
                     "🏆 Peringkat 1",
@@ -150,36 +143,25 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
                     f"{leader_bkb['bkb_pct']:.2f}%",
                     0.0,
                     0,
-                    f"Juara 1 (unggul {selisih_pct:.2f}% atas #{2}: {runner_up['kec']})",
+                    f"Juara 1 (unggul {selisih_pct:.2f}% atas #2: {runner_up['kec']})",
                 )
             return ("🏆 Peringkat 1", leader_bkb["kec"], f"{leader_bkb['bkb_pct']:.2f}%", 0.0, 0, "Juara 1")
 
-        # Target bukan peringkat 1 -> kejar leader_bkb (peringkat 1)
-        if pos_bkb == 2:
-            # Cukup lewati peringkat 1 (leader_bkb)
-            if target_item["bkb_tgt"] > 0:
-                # Minimal persentase untuk menyalip leader_bkb: leader_bkb['bkb_pct'] + 0.01
-                target_pct_lewati = leader_bkb["bkb_pct"] + 0.01
-                butuh_peserta_float = (target_pct_lewati / 100.0) * target_item["bkb_tgt"] - target_item["bkb_cap"]
-                butuh_peserta = max(1, int(math.ceil(butuh_peserta_float - 1e-9)))
-                pct_setelah_tambah = round(((target_item["bkb_cap"] + butuh_peserta) / target_item["bkb_tgt"]) * 100.0, 2)
-                kurang_pct = max(0.0, round(pct_setelah_tambah - target_item["bkb_pct"], 2))
-            else:
-                butuh_peserta = 0
-                kurang_pct = max(0.0, round((leader_bkb["bkb_pct"] + 0.01) - target_item["bkb_pct"], 2))
-            status_teks = f"Kurang ~{butuh_peserta:,} peserta (untuk menyalip {leader_bkb['kec']})"
-            return (f"#{pos_bkb}", leader_bkb["kec"], f"{leader_bkb['bkb_pct']:.2f}%", kurang_pct, butuh_peserta, status_teks)
+        if target_item["bkb_tgt"] > 0:
+            target_pct_lewati = leader_bkb["bkb_pct"] + 0.01
+            butuh_peserta_float = (target_pct_lewati / 100.0) * target_item["bkb_tgt"] - target_item["bkb_cap"]
+            butuh_peserta = max(1, int(math.ceil(butuh_peserta_float - 1e-9)))
+            pct_setelah_tambah = round(((target_item["bkb_cap"] + butuh_peserta) / target_item["bkb_tgt"]) * 100.0, 2)
+            kurang_pct = max(0.0, round(pct_setelah_tambah - target_item["bkb_pct"], 2))
         else:
-            # Peringkat >= 3: tampilkan selisih ke peringkat 1 dan jumlah peserta agar menyalip peringkat 1
-            if target_item["bkb_tgt"] > 0:
-                target_pct_lewati = leader_bkb["bkb_pct"] + 0.01
-                butuh_peserta_float = (target_pct_lewati / 100.0) * target_item["bkb_tgt"] - target_item["bkb_cap"]
-                butuh_peserta = max(1, int(math.ceil(butuh_peserta_float - 1e-9)))
-            else:
-                butuh_peserta = 0
+            butuh_peserta = 0
             kurang_pct = max(0.0, round((leader_bkb["bkb_pct"] + 0.01) - target_item["bkb_pct"], 2))
+
+        if pos_bkb == 2:
+            status_teks = f"Kurang ~{butuh_peserta:,} peserta (untuk menyalip {leader_bkb['kec']})"
+        else:
             status_teks = f"Posisi #{pos_bkb} | Kurang ~{butuh_peserta:,} peserta salip {leader_bkb['kec']}"
-            return (f"#{pos_bkb}", leader_bkb["kec"], f"{leader_bkb['bkb_pct']:.2f}%", kurang_pct, butuh_peserta, status_teks)
+        return (f"#{pos_bkb}", leader_bkb["kec"], f"{leader_bkb['bkb_pct']:.2f}%", kurang_pct, butuh_peserta, status_teks)
 
     def hitung_kejar_bkl():
         if pos_bkl == 1:
@@ -192,7 +174,7 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
                     f"{leader_bkl['bkl_pct']:.2f}%",
                     0.0,
                     0,
-                    f"Juara 1 (unggul {selisih_pct:.2f}% atas #{2}: {runner_up['kec']})",
+                    f"Juara 1 (unggul {selisih_pct:.2f}% atas #2: {runner_up['kec']})",
                 )
             return ("🏆 Peringkat 1", leader_bkl["kec"], f"{leader_bkl['bkl_pct']:.2f}%", 0.0, 0, "Juara 1")
 
@@ -232,7 +214,7 @@ def hitung_analisis_target(rekap_rows, target_kec: str, kab_nama: str, bulan_nam
             bkl_rank_str,
             f"{target_item['bkl_pct']:.2f}%",
             f"{bkl_lead_kec} ({bkl_lead_pct})",
-            f"+{bkl_kurang_pct:.2f}%",
+            f"+{bkb_kurang_pct:.2f}%",
             f"{bkl_kurang_unit:,} capaian" if bkl_kurang_unit > 0 else "0",
             bkl_status,
         ],
@@ -285,17 +267,12 @@ def cek_dan_kirim_notif_tersalip(worker, analisis, bot_token: str, chat_id: str)
             leader_nama = leader["kec"] if leader else "-"
             leader_pct = leader["bkb_pct"] if leader else 0.0
             target_pct = analisis["target_item"]["bkb_pct"]
-            # Kirim alert jika sebelumnya peringkat 1 dan belum alert untuk penyalip yang sama
             if kec_state["bkb_was_1"] and kec_state["bkb_alerted_leader"] != leader_nama:
                 pesan = (
-                    f"⚠️ <b>PERINGKAT 1 BKB TERSALIP!</b>
-"
-                    f"Kabupaten/Kota: <b>{kab}</b>
-"
-                    f"Periode: <b>{periode}</b>
-"
-                    f"Kecamatan Target: <b>{kec}</b> (turun ke Peringkat #{analisis['pos_bkb']} dengan <b>{target_pct:.2f}%</b>)
-"
+                    "⚠️ <b>PERINGKAT 1 BKB TERSALIP!</b>\n"
+                    f"Kabupaten/Kota: <b>{kab}</b>\n"
+                    f"Periode: <b>{periode}</b>\n"
+                    f"Kecamatan Target: <b>{kec}</b> (turun ke Peringkat #{analisis['pos_bkb']} dengan <b>{target_pct:.2f}%</b>)\n"
                     f"Menyalip ke Peringkat #1: <b>{leader_nama}</b> (<b>{leader_pct:.2f}%</b>)"
                 )
                 ok, info = kirim_telegram(bot_token, chat_id, pesan)
@@ -316,14 +293,10 @@ def cek_dan_kirim_notif_tersalip(worker, analisis, bot_token: str, chat_id: str)
             target_pct = analisis["target_item"]["bkl_pct"]
             if kec_state["bkl_was_1"] and kec_state["bkl_alerted_leader"] != leader_nama:
                 pesan = (
-                    f"⚠️ <b>PERINGKAT 1 BKL TERSALIP!</b>
-"
-                    f"Kabupaten/Kota: <b>{kab}</b>
-"
-                    f"Periode: <b>{periode}</b>
-"
-                    f"Kecamatan Target: <b>{kec}</b> (turun ke Peringkat #{analisis['pos_bkl']} dengan <b>{target_pct:.2f}%</b>)
-"
+                    "⚠️ <b>PERINGKAT 1 BKL TERSALIP!</b>\n"
+                    f"Kabupaten/Kota: <b>{kab}</b>\n"
+                    f"Periode: <b>{periode}</b>\n"
+                    f"Kecamatan Target: <b>{kec}</b> (turun ke Peringkat #{analisis['pos_bkl']} dengan <b>{target_pct:.2f}%</b>)\n"
                     f"Menyalip ke Peringkat #1: <b>{leader_nama}</b> (<b>{leader_pct:.2f}%</b>)"
                 )
                 ok, info = kirim_telegram(bot_token, chat_id, pesan)
@@ -488,7 +461,6 @@ with col3:
 # ---------- pilihan kecamatan target juara 1 + pengaturan telegram ----------
 kab_id_aktif = core.KABUPATEN_MAPPING[kab_nama]
 
-# Kumpulkan daftar kecamatan yang tersedia dari cache master atau hasil rekap terakhir
 opsi_kec = ["(Tidak ada / Pantau semua)"]
 try:
     master_cached = core._MASTER.get(kab_id_aktif)
@@ -508,7 +480,6 @@ if st.session_state.hasil_rekap and st.session_state.hasil_rekap.get("rekap"):
         if k not in opsi_kec:
             opsi_kec.append(k)
 
-# Jika kecamatan target belum ada di opsi_kec (mis. baru ganti kabupaten), tetap sertakan agar tidak error
 if st.session_state.target_kec_pilih not in opsi_kec:
     opsi_kec.append(st.session_state.target_kec_pilih)
 
@@ -564,7 +535,6 @@ with btn_col2:
 with btn_col3:
     paksa_refresh = st.checkbox("Abaikan cache master", value=False)
 
-# Tangani perubahan toggle auto-refresh
 if auto_refresh_ui != st.session_state.auto_refresh_aktif:
     st.session_state.auto_refresh_aktif = auto_refresh_ui
     if not auto_refresh_ui:
@@ -681,7 +651,6 @@ def tampilkan_hasil_live():
     if hasil is None:
         return
 
-    # Info status sinkronisasi latar belakang
     if st.session_state.auto_refresh_aktif and is_running and params:
         st.caption(
             f"🟢 Auto-refresh latar belakang aktif (setiap 30 detik) untuk **{params[1]}** "
@@ -720,7 +689,6 @@ def tampilkan_hasil_live():
     kol_detail_tampil = ["No"] + core.KOLOM_DETAIL
     df_detail = pd.DataFrame(detail_formatted, columns=kol_detail_tampil)
 
-    # Unduh CSV langsung dari browser
     dl1, dl2, _ = st.columns([1.3, 1.3, 4])
     with dl1:
         st.download_button(
@@ -750,7 +718,6 @@ def tampilkan_hasil_live():
         tahun_pilih,
     )
 
-    # ---------- bagian pantauan kecamatan target juara 1 ----------
     if analisis is not None:
         st.markdown(
             f"""
@@ -777,7 +744,6 @@ def tampilkan_hasil_live():
         df_kejar = pd.DataFrame(analisis["tabel_kejar"], columns=kol_kejar)
         st.dataframe(df_kejar, use_container_width=True, hide_index=True)
 
-    # ---------- styling baris rekap kecamatan ----------
     def sorot_baris_rekap(row):
         nama_kec_row = str(row.get("Nama Kecamatan", "")).strip().upper()
         is_target = bool(target_kec_aktif) and target_kec_aktif != "(Tidak ada / Pantau semua)" and nama_kec_row == target_kec_aktif.strip().upper()
@@ -791,7 +757,6 @@ def tampilkan_hasil_live():
         styles = []
         for col_name in row.index:
             if is_target and col_name == "Nama Kecamatan":
-                # Highlight khusus di kolom Nama Kecamatan target
                 styles.append("background-color: #FEF08A; color: #713F12; font-weight: 800; border: 2px solid #CA8A04;")
             elif is_target:
                 styles.append("background-color: #FEF9C3; color: #1E293B; font-weight: 600;")
