@@ -11,7 +11,22 @@ Jalankan lokal:
   streamlit run app_web.py
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo
+    _WIB_TZ = ZoneInfo("Asia/Jakarta")
+except Exception:
+    _WIB_TZ = timezone(timedelta(hours=7))
+
+
+def waktu_wib_sekarang() -> datetime:
+    """Mengembalikan waktu saat ini dalam zona waktu WIB (UTC+7)."""
+    return datetime.now(_WIB_TZ)
+
+
+def jam_wib_str() -> str:
+    """Mengembalikan string jam WIB berformat HH:MM:SS WIB."""
+    return f"{waktu_wib_sekarang().strftime('%H:%M:%S')} WIB"
 import math
 import threading
 import time
@@ -410,7 +425,7 @@ def mulai_background_refresh(
                 with worker["lock"]:
                     worker["status_bg"] = "Menyegarkan data di latar belakang..."
                 hasil_baru = core.jalankan_rekap(kab_id, bulan_val, tahun_pilih, lambda *_: None)
-                waktu_str = datetime.now().strftime("%H:%M:%S")
+                waktu_str = jam_wib_str()
                 with worker["lock"]:
                     if not stop_event.is_set():
                         worker["hasil"] = hasil_baru
@@ -427,7 +442,7 @@ def mulai_background_refresh(
                 )
                 cek_dan_kirim_notif_tersalip(worker, analisis_baru, tg_token, tg_chat_id)
             except Exception as exc:
-                waktu_str = datetime.now().strftime("%H:%M:%S")
+                waktu_str = jam_wib_str()
                 with worker["lock"]:
                     if not stop_event.is_set():
                         worker["error"] = str(exc)
@@ -470,7 +485,7 @@ if "sort_persen_mode" not in st.session_state:
 worker = dapatkan_worker(st.session_state.session_uid)
 
 # ---------- panel filter utama ----------
-sekarang = datetime.now()
+sekarang = waktu_wib_sekarang()
 nama_bulan_default = next(
     (k for k, v in core.BULAN.items() if v == sekarang.month),
     "Januari (1)",
@@ -613,7 +628,7 @@ if jalankan:
 
     try:
         hasil = core.jalankan_rekap(kab_id, bulan_val, tahun_pilih, lapor)
-        waktu_awal = datetime.now().strftime("%H:%M:%S")
+        waktu_awal = jam_wib_str()
         st.session_state.hasil_rekap = hasil
         st.session_state.last_sync = waktu_awal
 
