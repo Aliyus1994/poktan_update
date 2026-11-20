@@ -93,6 +93,10 @@ def _angka_bersih(val) -> float:
     return core.to_num(val)
 
 
+def _bulat_bersih(val) -> int:
+    return int(round(_angka_bersih(val)))
+
+
 @st.cache_data(show_spinner=False, ttl=900)
 def ambil_daftar_kecamatan_kab(kab_id: str):
     """Mengambil daftar nama kecamatan untuk kabupaten tertentu tanpa memblokir berat."""
@@ -149,7 +153,6 @@ def _hitung_kejar_satu_indikator(
         }
 
     leader_pct = leader[pct_key] if leader else 0.0
-    # Target persentase minimal agar melampaui #1 (selisih +0.01% untuk keamanan pembulatan 2 desimal)
     ambang_pct_juara = leader_pct + 0.01
 
     if tgt_kec > 0:
@@ -461,6 +464,8 @@ if "tg_token" not in st.session_state:
     st.session_state.tg_token = ""
 if "tg_chat_id" not in st.session_state:
     st.session_state.tg_chat_id = ""
+if "sort_persen_mode" not in st.session_state:
+    st.session_state.sort_persen_mode = "Urutan Bawaan"
 
 worker = dapatkan_worker(st.session_state.session_uid)
 
@@ -512,7 +517,6 @@ if st.session_state.hasil_rekap and st.session_state.hasil_rekap.get("rekap"):
         if k not in opsi_kec:
             opsi_kec.append(k)
 
-# Jika kecamatan sebelumnya bukan milik kabupaten yang sedang dipilih, kembalikan ke default
 if st.session_state.target_kec_pilih not in opsi_kec:
     st.session_state.target_kec_pilih = "(Tidak ada / Pantau semua)"
 
@@ -703,7 +707,25 @@ def tampilkan_hasil_live():
     if hasil.get("catatan"):
         st.warning("Catatan: " + " | ".join(hasil["catatan"]))
 
-    rekap_formatted = [
+    # Data numerik murni agar sorting berurutan dari atas ke bawah secara akurat
+    rekap_numeric = [
+        [
+            idx,
+            str(r[0]).strip(),
+            _bulat_bersih(r[1]),
+            _bulat_bersih(r[2]),
+            round(_angka_bersih(r[3]), 2),
+            _bulat_bersih(r[4]),
+            _bulat_bersih(r[5]),
+            round(_angka_bersih(r[6]), 2),
+        ]
+        for idx, r in enumerate(hasil["rekap"], start=1)
+    ]
+    kol_rekap_tampil = ["No"] + core.KOLOM_REKAP
+    df_rekap = pd.DataFrame(rekap_numeric, columns=kol_rekap_tampil)
+
+    # Untuk CSV unduhan tetap format rapi seperti sebelumnya
+    rekap_csv = [
         [
             idx,
             r[0],
@@ -716,8 +738,7 @@ def tampilkan_hasil_live():
         ]
         for idx, r in enumerate(hasil["rekap"], start=1)
     ]
-    kol_rekap_tampil = ["No"] + core.KOLOM_REKAP
-    df_rekap = pd.DataFrame(rekap_formatted, columns=kol_rekap_tampil)
+    df_rekap_csv = pd.DataFrame(rekap_csv, columns=kol_rekap_tampil)
 
     detail_formatted = [[idx] + r for idx, r in enumerate(hasil["detail"], start=1)]
     kol_detail_tampil = ["No"] + core.KOLOM_DETAIL
@@ -727,7 +748,7 @@ def tampilkan_hasil_live():
     with dl1:
         st.download_button(
             label="Unduh CSV Rekap",
-            data=df_rekap.to_csv(index=False).encode("utf-8-sig"),
+            data=df_rekap_csv.to_csv(index=False).encode("utf-8-sig"),
             file_name=f"rekap_siga_{st.session_state.periode_label}.csv",
             mime="text/csv",
             use_container_width=True,
@@ -756,12 +777,12 @@ def tampilkan_hasil_live():
         bkb_info = analisis["info_bkb"]
         bkl_info = analisis["info_bkl"]
         ringkasan_bkb = (
-            f"🏆 Juara 1"
+            "🏆 Juara 1"
             if bkb_info["posisi"] == 1
             else f"#{bkb_info['posisi']} ({analisis['target_item']['bkb_pct']:.2f}%) -> butuh <b>{bkb_info['total_capaian_target_juara']:,}</b> capaian (+{bkb_info['tambah_capaian']:,}) utk salip {bkb_info['leader']['kec']} ({bkb_info['lead_pct_str']})"
         )
         ringkasan_bkl = (
-            f"🏆 Juara 1"
+            "🏆 Juara 1"
             if bkl_info["posisi"] == 1
             else f"#{bkl_info['posisi']} ({analisis['target_item']['bkl_pct']:.2f}%) -> butuh <b>{bkl_info['total_capaian_target_juara']:,}</b> capaian (+{bkl_info['tambah_capaian']:,}) utk salip {bkl_info['leader']['kec']} ({bkl_info['lead_pct_str']})"
         )
@@ -796,9 +817,9 @@ def tampilkan_hasil_live():
         is_target = bool(target_kec_aktif) and target_kec_aktif != "(Tidak ada / Pantau semua)" and nama_kec_row == target_kec_aktif.strip().upper()
 
         try:
-            persen_bkb = float(str(row["% BKB"]).replace("%", "").strip())
+            persen_bkb = float(row["% BKB"])
             di_atas_ambang = persen_bkb > core.AMBANG_BIRU
-        except ValueError:
+        except (ValueError, TypeError):
             di_atas_ambang = False
 
         styles = []
@@ -816,14 +837,63 @@ def tampilkan_hasil_live():
     tab_rekap, tab_detail = st.tabs(["Rekap Kecamatan", "Detail Poktan"])
 
     with tab_rekap:
+        sort_col1, sort_col2 = st.columns([2.2, 4.8])
+        with sort_col1:
+            opsi_sort_persen = [
+                "Urutan Bawaan",
+                "% BKB (Tertinggi -> Terendah)",
+                "% BKB (Terendah -> Tertinggi)",
+                "% BKL (Tertinggi -> Terendah)",
+                "% BKL (Terendah -> Tertinggi)",
+            ]
+            sort_pilihan = st.selectbox(
+                "Urutkan Persentase",
+                options=opsi_sort_persen,
+                index=opsi_sort_persen.index(st.session_state.sort_persen_mode)
+                if st.session_state.sort_persen_mode in opsi_sort_persen
+                else 0,
+                key="sort_persen_selectbox",
+            )
+            st.session_state.sort_persen_mode = sort_pilihan
+
+        df_rekap_tampil = df_rekap.copy()
+        if sort_pilihan == "% BKB (Tertinggi -> Terendah)":
+            df_rekap_tampil = df_rekap_tampil.sort_values(by="% BKB", ascending=False, kind="mergesort")
+        elif sort_pilihan == "% BKB (Terendah -> Tertinggi)":
+            df_rekap_tampil = df_rekap_tampil.sort_values(by="% BKB", ascending=True, kind="mergesort")
+        elif sort_pilihan == "% BKL (Tertinggi -> Terendah)":
+            df_rekap_tampil = df_rekap_tampil.sort_values(by="% BKL", ascending=False, kind="mergesort")
+        elif sort_pilihan == "% BKL (Terendah -> Tertinggi)":
+            df_rekap_tampil = df_rekap_tampil.sort_values(by="% BKL", ascending=True, kind="mergesort")
+
+        # Nonaktifkan sorting bawaan kolom pada semua kolom selain % BKB dan % BKL
+        kolom_config_rekap = {}
+        for col_name in df_rekap_tampil.columns:
+            if col_name == "% BKB":
+                kolom_config_rekap[col_name] = st.column_config.NumberColumn(
+                    "% BKB",
+                    format="%.2f%%",
+                )
+            elif col_name == "% BKL":
+                kolom_config_rekap[col_name] = st.column_config.NumberColumn(
+                    "% BKL",
+                    format="%.2f%%",
+                )
+            elif col_name in ["Total Peserta Riil", "Target BKB", "Target BKL", "Capaian BKL"]:
+                kolom_config_rekap[col_name] = st.column_config.NumberColumn(
+                    col_name,
+                    format="%d",
+                )
+
         ket_highlight = f"Seluruh kecamatan tetap ditampilkan. Baris biru = % BKB di atas {core.AMBANG_BIRU:.0f}."
         if analisis is not None:
             ket_highlight += f" Highlight kuning pada baris & kolom **Nama Kecamatan** = kecamatan terpilih (**{analisis['target_kec']}**)."
         st.caption(ket_highlight)
         st.dataframe(
-            df_rekap.style.apply(sorot_baris_rekap, axis=1),
+            df_rekap_tampil.style.apply(sorot_baris_rekap, axis=1),
             use_container_width=True,
             hide_index=True,
+            column_config=kolom_config_rekap,
         )
 
     with tab_detail:
